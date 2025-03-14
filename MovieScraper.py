@@ -2,7 +2,8 @@ from openai import OpenAI
 from pdf2image import convert_from_path
 import base64
 import pandas as pd 
-import os
+import os 
+import pickle
 from dotenv import load_dotenv 
 
 load_dotenv() 
@@ -19,19 +20,24 @@ total_tokens_used = 0
 # Initialize OpenAI Client (Required for new API version)
 client = OpenAI(api_key=OPEN_AI_API_KEY)
 
+def save_checkpoint(hindi_texts, romanized_texts, checkpoint_number):
+    with open(f"checkpoint_{checkpoint_number}.pkl", "wb") as f:
+        pickle.dump((hindi_texts, romanized_texts), f)
+    print(f"✅ Checkpoint {checkpoint_number} saved")
+
 # Sub-Function to encode image to base64
 def encode_image(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode("utf-8")
 
-# Function to track tokens and prevent overuse
+# Sub-Function to track tokens and prevent overuse
 def update_token_usage(response):
     global total_tokens_used
     tokens_used = response.usage.total_tokens
     total_tokens_used += tokens_used
     print(f"✅ Tokens Used: {tokens_used} | Total: {total_tokens_used}/{MAX_TOKENS}")
 
-# Function to extract multiple Hindi texts in one batch using GPT-4 Vision
+# Main Function to extract multiple Hindi texts in one batch using GPT-4 Vision
 def extract_hindi_batch(image_paths):
     """Extracts Hindi text from multiple images in a single OpenAI API call while tracking token usage."""
     
@@ -64,7 +70,7 @@ def extract_hindi_batch(image_paths):
 
     return hindi_texts
 
-# Function to transliterate multiple Hindi texts in one batch while tracking token usage
+# Main Function to transliterate multiple Hindi texts in one batch while tracking token usage
 def transliterate_hindi_batch(hindi_texts):
     """Transliterates multiple Hindi texts in a single API call to optimize costs while tracking token usage."""
     
@@ -110,7 +116,6 @@ for i in range(0, len(images), BATCH_SIZE):
 
     batch_images = images[i:i + BATCH_SIZE]  # Select a batch of images
 
-    # Save images temporarily
     image_paths = []
     for j, img in enumerate(batch_images):
         img_path = f"page_{i + j + 1}.png"
@@ -122,15 +127,30 @@ for i in range(0, len(images), BATCH_SIZE):
 
     # Transliterate Hindi text in batch
     romanized_batch = transliterate_hindi_batch(hindi_batch)
-    romanized_texts.extend(romanized_batch)
+    romanized_texts.extend(romanized_batch) 
+    
+    save_checkpoint(hindi_texts, romanized_texts, i % BATCH_SIZE)
 
 # Print transliterated text
 for item in romanized_texts:
     print(item)
 
+min_length = min(len(hindi_texts), len(romanized_texts))
+print(f"Hindi texts: {len(hindi_texts)}, Romanized texts: {len(romanized_texts)}")
+print(f"Using {min_length} entries for both")
+    
+hindi_texts_trimmed = hindi_texts[:min_length]
+romanized_texts_trimmed = romanized_texts[:min_length]
+
 # Save results to CSV for Anki
-df = pd.DataFrame({"Hindi": hindi_texts, "Romanized Hindi": romanized_texts})
+df = pd.DataFrame({"Hindi": hindi_texts_trimmed, "Romanized Hindi": romanized_texts_trimmed})
 df.to_csv("hindi_translations.csv", index=False, encoding="utf-8")
+
+print("\nSamples of extracted data:")
+for i in range(min(3, min_length)):
+    print(f"Hindi: {hindi_texts_trimmed[i]}")
+    print(f"Romanized: {romanized_texts_trimmed[i]}")
+    print("-" * 50)
 
 print(f"✅ Done! Used {total_tokens_used}/{MAX_TOKENS} tokens.")
 print("✅ Translations saved to hindi_translations.csv")
